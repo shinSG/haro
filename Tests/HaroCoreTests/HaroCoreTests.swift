@@ -176,4 +176,137 @@ final class ConfigurationTests: XCTestCase {
                            .invalidValue(option: "--rate", value: "fast"))
         }
     }
+
+    func testDefaultEngineIsSystem() throws {
+        XCTAssertEqual(try Configuration.parse([]).engine, .system)
+    }
+
+    func testParsesEngineAndConfigOptions() throws {
+        let config = try Configuration.parse(
+            ["--engine", "api", "--config", "/tmp/p.json",
+             "--api-url", "https://x", "--api-voice", "alloy", "--api-key", "secret"])
+        XCTAssertEqual(config.engine, .api)
+        XCTAssertEqual(config.configPath, "/tmp/p.json")
+        XCTAssertEqual(config.apiURL, "https://x")
+        XCTAssertEqual(config.apiVoice, "alloy")
+        XCTAssertEqual(config.apiKey, "secret")
+    }
+
+    func testConfigPathImpliesApiEngine() throws {
+        let config = try Configuration.parse(["--config", "/tmp/p.json"])
+        XCTAssertEqual(config.engine, .api)
+    }
+
+    func testInvalidEngineThrows() {
+        XCTAssertThrowsError(try Configuration.parse(["--engine", "bogus"])) { error in
+            XCTAssertEqual(error as? Configuration.ParseError,
+                           .invalidValue(option: "--engine", value: "bogus"))
+        }
+    }
+}
+
+final class TemplateTests: XCTestCase {
+    func testRendersBraceValues() {
+        let result = Template.render("hello {{name}}!", values: ["name": "world"], environment: [:])
+        XCTAssertEqual(result, "hello world!")
+    }
+
+    func testRendersEnvironmentValues() {
+        let result = Template.render("key=${API_KEY}", values: [:], environment: ["API_KEY": "abc"])
+        XCTAssertEqual(result, "key=abc")
+    }
+
+    func testUnknownPlaceholdersBecomeEmpty() {
+        XCTAssertEqual(Template.render("[{{x}}][${Y}]", values: [:], environment: [:]), "[][]")
+    }
+
+    func testHandlesWhitespaceInPlaceholderNames() {
+        let result = Template.render("{{ name }} ${ ENV }",
+                                     values: ["name": "v"], environment: ["ENV": "e"])
+        XCTAssertEqual(result, "v e")
+    }
+
+    func testLeavesUnterminatedPlaceholders() {
+        XCTAssertEqual(Template.render("a {{ b", values: ["b": "x"], environment: [:]), "a {{ b")
+    }
+
+    func testJSONEscape() {
+        XCTAssertEqual(Template.jsonEscape("say \"hi\"\nok\t\\"),
+                       "say \\\"hi\\\"\\nok\\t\\\\")
+    }
+}
+
+final class TTSProviderConfigTests: XCTestCase {
+    func testDecodesWithDefaults() throws {
+        let json = """
+        {"url": "https://api.example.com/tts", "body": "{\\"text\\":\\"{{text}}\\"}"}
+        """
+        let provider = try JSONDecoder().decode(TTSProviderConfig.self, from: Data(json.utf8))
+        XCTAssertEqual(provider.url, "https://api.example.com/tts")
+        XCTAssertEqual(provider.method, "POST")
+        XCTAssertEqual(provider.format, "mp3")
+        XCTAssertEqual(provider.timeout, 30)
+        XCTAssertTrue(provider.headers.isEmpty)
+        XCTAssertNil(provider.audioBase64Field)
+    }
+
+    func testBuildRequestEscapesTextAndExpandsEnv() {
+        let provider = TTSProviderConfig(
+            url: "https://api.example.com/tts",
+            headers: ["Authorization": "******",
+                      "Content-Type": "application/json"],
+            body: "{\"voice\":\"{{voice}}\",\"input\":\"{{text}}\",\"format\":\"{{format}}\"}",
+            voice: "alloy",
+            format: "wav")
+
+        let request = provider.buildRequest(text: "He said \"hi\"\nbye",
+                                            environment: ["HARO_API_KEY": "sk-123"])
+
+        XCTAssertEqual(request.url, "https://api.example.com/tts")
+        XCTAssertEqual(request.headers["Authorization"], "******")
+        XCTAssertEqual(request.headers["Content-Type"], "application/json")
+        let body = String(decoding: request.body, as: UTF8.self)
+        XCTAssertEqual(body,
+            "{\"voice\":\"alloy\",\"input\":\"He said \\\"hi\\\"\\nbye\",\"format\":\"wav\"}")
+    }
+}
+
+final class ProviderResolutionTests: XCTestCase {
+    private let providerJSON = Data("""
+    {"url": "https://api.example.com/tts", "body": "{\\"input\\":\\"{{text}}\\"}", "voice": "alloy"}
+    """.utf8)
+
+    func testSystemEngineReturnsNilProvider() throws {
+        let config = try Configuration.parse([])
+        let provider = try config.resolveProvider(load: { _ in Data() })
+        XCTAssertNil(provider)
+    }
+
+    func testApiEngineWithoutConfigThrows() {
+        let config = Configuration(engine: .api)
+        XCTAssertThrowsError(try config.resolveProvider(load: { _ in Data() }))
+    }
+
+    func testLoadsProviderFromInjectedLoader() throws {
+        let config = try Configuration.parse(["--config", "/path/p.json"])
+        let provider = try config.resolveProvider(load: { path in
+            XCTAssertEqual(path, "/path/p.json")
+            return self.providerJSON
+        })
+        XCTAssertEqual(provider?.url, "https://api.example.com/tts")
+        XCTAssertEqual(provider?.voice, "alloy")
+    }
+
+    func testCLIOverridesAreApplied() throws {
+        let config = try Configuration.parse(
+            ["--config", "/p.json", "--api-url", "https://override", "--api-voice", "nova"])
+        let provider = try config.resolveProvider(load: { _ in self.providerJSON })
+        XCTAssertEqual(provider?.url, "https://override")
+        XCTAssertEqual(provider?.voice, "nova")
+    }
+
+    func testInvalidJSONThrowsDecodeError() {
+        let config = try! Configuration.parse(["--config", "/p.json"])
+        XCTAssertThrowsError(try config.resolveProvider(load: { _ in Data("not json".utf8) }))
+    }
 }

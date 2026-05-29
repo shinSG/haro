@@ -1,0 +1,12 @@
+{
+  "url": "https://api.openai.com/v1/audio/speech",
+  "method": "POST",
+  "headers": {
+    "Authorization": "Bearer ${HARO_API_KEY}",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"model\":\"tts-1\",\"voice\":\"{{voice}}\",\"input\":\"{{text}}\",\"response_format\":\"{{format}}\"}",
+  "voice": "alloy",
+  "format": "mp3",
+  "timeout": 30
+}

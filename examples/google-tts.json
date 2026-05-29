@@ -1,0 +1,12 @@
+{
+  "url": "https://texttospeech.googleapis.com/v1/text:synthesize?key=${HARO_API_KEY}",
+  "method": "POST",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"input\":{\"text\":\"{{text}}\"},\"voice\":{\"languageCode\":\"{{voice}}\"},\"audioConfig\":{\"audioEncoding\":\"MP3\"}}",
+  "voice": "cmn-CN",
+  "format": "mp3",
+  "audioBase64Field": "audioContent",
+  "timeout": 30
+}

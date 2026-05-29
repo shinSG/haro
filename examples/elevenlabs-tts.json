@@ -1,0 +1,11 @@
+{
+  "url": "https://api.elevenlabs.io/v1/text-to-speech/${HARO_VOICE_ID}",
+  "method": "POST",
+  "headers": {
+    "xi-api-key": "${HARO_API_KEY}",
+    "Content-Type": "application/json"
+  },
+  "body": "{\"text\":\"{{text}}\",\"model_id\":\"eleven_multilingual_v2\"}",
+  "format": "mp3",
+  "timeout": 30
+}

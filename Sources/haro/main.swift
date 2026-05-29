@@ -18,10 +18,35 @@ if config.showHelp {
 }
 
 #if os(macOS)
-let speaker: Speaker = config.mute
-    ? NullSpeaker()
-    : SystemSpeaker(voiceIdentifier: config.voice, rate: config.rate, volume: config.volume)
+func makeSpeaker(_ config: Configuration) -> Speaker {
+    if config.mute {
+        return NullSpeaker()
+    }
 
+    switch config.engine {
+    case .system:
+        return SystemSpeaker(voiceIdentifier: config.voice, rate: config.rate, volume: config.volume)
+    case .api:
+        do {
+            guard let provider = try config.resolveProvider(load: {
+                try Data(contentsOf: URL(fileURLWithPath: $0))
+            }) else {
+                // Should not happen for .api, but fall back safely.
+                return SystemSpeaker(voiceIdentifier: config.voice, rate: config.rate, volume: config.volume)
+            }
+            var environment = ProcessInfo.processInfo.environment
+            if let apiKey = config.apiKey {
+                environment["HARO_API_KEY"] = apiKey
+            }
+            return RemoteTTSSpeaker(provider: provider, environment: environment)
+        } catch {
+            FileHandle.standardError.write(Data("haro: \(error)\n".utf8))
+            exit(78) // EX_CONFIG
+        }
+    }
+}
+
+let speaker = makeSpeaker(config)
 let filter = LineFilter(minMeaningfulCharacters: config.minMeaningfulCharacters)
 let processor = OutputProcessor(speaker: speaker, filter: filter)
 let runner = PTYRunner(processor: processor)
